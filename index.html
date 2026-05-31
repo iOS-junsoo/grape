@@ -63,6 +63,41 @@
   .save-hint { font-size:12px; color:#999; }
 
   .hint { font-size:11px; color:#aaa; text-align:center; max-width:480px; line-height:1.5; }
+
+  /* 20개 달성 축하 오버레이 */
+  .celebrate {
+    position:fixed; inset:0; z-index:9999; display:none;
+    align-items:center; justify-content:center;
+    background:rgba(0,0,0,0.45); cursor:pointer; overflow:hidden;
+  }
+  .celebrate.show { display:flex; animation:fadeIn .3s ease; }
+  @keyframes fadeIn { from{opacity:0;} to{opacity:1;} }
+  .celebrate-fw {
+    position:absolute; width:min(90vw, 90vh); height:auto;
+    pointer-events:none; opacity:0.95;
+  }
+  .celebrate-gorilla {
+    position:relative; width:min(70vw, 360px); height:auto;
+    z-index:2; pointer-events:none;
+    animation:gorillaPop .6s cubic-bezier(.34,1.56,.64,1);
+    filter:drop-shadow(0 10px 24px rgba(0,0,0,.4));
+  }
+  @keyframes gorillaPop {
+    0%{transform:scale(.2) translateY(40px);opacity:0;}
+    60%{transform:scale(1.12) translateY(0);opacity:1;}
+    100%{transform:scale(1) translateY(0);opacity:1;}
+  }
+  .celebrate-msg {
+    position:absolute; top:14%; left:0; right:0; text-align:center; z-index:3;
+    font-size:clamp(24px,7vw,44px); font-weight:900; color:#fff;
+    text-shadow:0 3px 12px rgba(0,0,0,.5), 0 0 20px rgba(180,90,210,.6);
+    animation:msgDrop .5s ease;
+  }
+  @keyframes msgDrop { from{transform:translateY(-30px);opacity:0;} to{transform:translateY(0);opacity:1;} }
+  .celebrate-close {
+    position:absolute; bottom:8%; left:0; right:0; text-align:center; z-index:3;
+    font-size:14px; color:rgba(255,255,255,.85);
+  }
 </style>
 </head>
 <body>
@@ -95,6 +130,14 @@
   </div>
 
   <div class="hint" id="modeHint"></div>
+
+  <!-- 20개 달성 축하 오버레이 -->
+  <div class="celebrate" id="celebrate" aria-hidden="true">
+    <img class="celebrate-fw" id="fwImg" alt="">
+    <img class="celebrate-gorilla" id="gorillaImg" alt="">
+    <div class="celebrate-msg">🎉 20개 달성! 🎉</div>
+    <div class="celebrate-close">탭하면 닫혀요</div>
+  </div>
 
 <script>
 (function(){
@@ -176,8 +219,49 @@
     progressEl.textContent=state.count+" / "+TOTAL+(state.count===TOTAL?"  🎉 다 모았어요!":"");
   }
 
+  // ===== 20개 달성 축하 =====
+  var celebrate=document.getElementById("celebrate");
+  var fwImg=document.getElementById("fwImg");
+  var gorillaImg=document.getElementById("gorillaImg");
+  var celebrateTimer=null;
+  var assetsPreloaded=false;
+  var firstSync=true;   // 첫 서버 동기화에서는 축하 재생 안 함
+
+  // GIF/WebP 미리 로드 (달성 순간 끊김 방지)
+  function preloadAssets(){
+    if(assetsPreloaded) return;
+    assetsPreloaded=true;
+    var a=new Image(); a.src="firework.gif";
+    var b=new Image(); b.src="gorilla.webp";
+  }
+  preloadAssets();
+
+  function showCelebration(){
+    // src를 매번 새로 지정해 GIF/WebP를 처음부터 재생
+    fwImg.src="firework.gif?t="+Date.now();
+    gorillaImg.src="gorilla.webp?t="+Date.now();
+    celebrate.classList.add("show");
+    if(celebrateTimer) clearTimeout(celebrateTimer);
+    // 7초 후 자동 닫힘
+    celebrateTimer=setTimeout(hideCelebration, 7000);
+  }
+  function hideCelebration(){
+    celebrate.classList.remove("show");
+    if(celebrateTimer){ clearTimeout(celebrateTimer); celebrateTimer=null; }
+  }
+  celebrate.addEventListener("click", hideCelebration);
+
+  // count 변화 감지: 20 미만 -> 20 도달 순간에만 재생
+  function checkMilestone(prev, now){
+    if(prev < TOTAL && now === TOTAL){ showCelebration(); }
+    if(now < TOTAL){ hideCelebration(); }  // 20 아래로 내려가면 닫기
+  }
+
   function applyCount(c, remote){
-    c=Math.max(0,Math.min(TOTAL,c)); state.count=c; paint();
+    c=Math.max(0,Math.min(TOTAL,c));
+    var prev=state.count;
+    state.count=c; paint();
+    checkMilestone(prev, c);
     if(remote && window.GrapeBackend && window.GrapeBackend.writeCount) window.GrapeBackend.writeCount(c);
   }
 
@@ -199,7 +283,13 @@
   // ---- Firebase 연결 훅 ----
   window.GrapeUI = {
     onRemoteUpdate: function(rm){
-      if(typeof rm.count==="number"){ state.count=Math.max(0,Math.min(TOTAL,rm.count)); paint(); }
+      if(typeof rm.count==="number"){
+        var prev=state.count;
+        var now=Math.max(0,Math.min(TOTAL,rm.count));
+        state.count=now; paint();
+        if(firstSync){ firstSync=false; }   // 첫 로드: 상태만 반영, 축하 생략
+        else { checkMilestone(prev, now); }
+      }
       if(typeof rm.goal==="string"){ state.goal=rm.goal; if(!goalDirty && document.activeElement!==goalInput) goalInput.value=rm.goal; }
     },
     setStatus:setStatus, isAdmin:isAdmin, boardId:(params.get("board")||"default")
